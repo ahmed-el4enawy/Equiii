@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<!-- Upload Box -->
+<div class="upload-zone" data-dropzone>
+    <p>Drag & drop an audio file here<br>or click to browse</p>
+</div>
+
+<!-- Hidden file input -->
+<input type="file" data-file-input accept=".wav,.npy,audio/wav" style="display:none">
+
+<!-- Input / Output Audio Players -->
+<div class="players">
+    <div class="player-section">
+        <h3>Input</h3>
+        <audio controls data-audio-input></audio>
+    </div>
+
+    <div class="player-section">
+        <h3>Output</h3>
+        <audio controls data-audio-output></audio>
+    </div>
+</div>
+
+<!-- Main Panels Layout -->
+<div class="layout">
+
+    <!-- Left: Equalizer section -->
+    <div class="eq-panel">
+        <h3>Equalizer</h3>
+        <button class="btn">Add Sub-Band</button>
+        <button class="btn">Clear</button>
+        <button class="btn">Save scheme</button>
+        <button class="btn">Load scheme</button>
+
+        <div class="eq-sliders" id="eq-sliders"></div>
+    </div>
+
+    <!-- Center: Spectrum -->
+    <div class="spectrum-panel">
+        <h3>Spectrum (click & drag in Generic mode to create band)</h3>
+        <canvas id="spectrum-canvas"></canvas>
+    </div>
+
+</div>
+
+<!-- Bottom Panels: Time-Domain & Spectrograms -->
+<div class="bottom-panels">
+
+    <div class="time-view left">
+        <h3>Input</h3>
+        <div class="viewer" id="time-input"></div>
+    </div>
+
+    <div class="time-view right">
+        <h3>Output</h3>
+        <div class="viewer" id="time-output"></div>
+    </div>
+
+    <div class="spectrograms" id="spectrograms-section">
+
+        <div class="spect-left">
+            <h3>Spectrogram Input</h3>
+            <canvas id="spectro-input"></canvas>
+        </div>
+
+        <div class="spect-right">
+            <h3>Spectrogram Output</h3>
+            <canvas id="spectro-output"></canvas>
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
