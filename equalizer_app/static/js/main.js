@@ -11,47 +11,52 @@ function downloadBlob(data, filename, type="application/octet-stream"){
   URL.revokeObjectURL(url); a.remove();
 }
 
-// ---------- DOM bindings (match base.html) ----------
-const btnOpen         = firstSel("#btn-open","#openSignalBtn","[data-action=open-signal]","#openSignal");
-const fileInput       = firstSel("#file-hidden","#fileInput","input[type=file][name=signal]","input[type=file]");
-const dropZone        = firstSel("#drop-zone","#dropZone","[data-role=dropzone]");
+// ---------- DOM bindings (match index.html) ----------
+const btnOpen         = firstSel("#btn-open");
+const fileInput       = firstSel("#file-hidden");
+const dropZone        = firstSel("#drop-zone");
 
-const btnSaveSettings = firstSel("#btn-save-settings","#saveSettingsBtn","[data-action=save-settings]");
-const btnLoadSettings = firstSel("#btn-load-settings","#loadSettingsBtn","[data-action=load-settings]");
-const modeSelect      = firstSel("#mode-select","#modeSelect","select[data-role=mode]");
-const btnScaleSwitch  = firstSel("#fft-scale","#fftScaleSwitch","[data-action=toggle-scale]");
-const chkShowSpec     = firstSel("#chk-spec","#toggleSpectrograms","[data-role=show-spectrograms]");
-const btnAIPanel      = firstSel("#btn-ai-panel","#toggleAI","[data-action=toggle-ai]");
+const btnSaveSettings = firstSel("#btn-save-settings");
+const btnLoadSettings = firstSel("#btn-load-settings");
+const modeSelect      = firstSel("#mode-select");
+const btnScaleSwitch  = firstSel("#fft-scale");
+const chkShowSpec     = firstSel("#chk-spec");
+const btnAIPanel      = firstSel("#btn-ai-panel");
 
-const eqPanel         = firstSel("#eq-sliders","[data-panel=eq]");
+const eqPanel         = firstSel("#eq-sliders");
 
-const spectrumCanvas  = firstSel("#fft-canvas","#spectrumCanvas","canvas[data-role=spectrum]");
+const spectrumCanvas  = firstSel("#fft-canvas");
 const spectrumCtx     = spectrumCanvas ? spectrumCanvas.getContext("2d") : null;
 
-const inputCanvas     = firstSel("#wave-in","#inputCanvas","[data-viewer=input] canvas");
-const outputCanvas    = firstSel("#wave-out","#outputCanvas","[data-viewer=output] canvas");
+const inputCanvas     = firstSel("#wave-in");
+const outputCanvas    = firstSel("#wave-out");
 const inCtx           = inputCanvas ? inputCanvas.getContext("2d") : null;
 const outCtx          = outputCanvas ? outputCanvas.getContext("2d") : null;
 
-const specInCanvas    = firstSel("#spec-in","canvas[data-role=spec-in]");
-const specOutCanvas   = firstSel("#spec-out","canvas[data-role=spec-out]");
+const specInCanvas    = firstSel("#spec-in");
+const specOutCanvas   = firstSel("#spec-out");
 const specInCtx       = specInCanvas ? specInCanvas.getContext("2d") : null;
 const specOutCtx      = specOutCanvas ? specOutCanvas.getContext("2d") : null;
 
-const btnAddSubBand   = firstSel("#btn-add-subband","#addSubBandBtn","[data-action=add-subband]");
-const btnSaveScheme   = firstSel("#btn-scheme-save","#saveSchemeBtn","[data-action=save-scheme]");
-const btnLoadScheme   = firstSel("#btn-scheme-load","#loadSchemeBtn","[data-action=load-scheme]");
+const btnAddSubBand   = firstSel("#btn-add-subband");
+const btnClearSubBand = firstSel("#btn-clear-subband"); // --- NEW ---
+const btnSaveScheme   = firstSel("#btn-scheme-save");
+const btnLoadScheme   = firstSel("#btn-scheme-load");
 
-// Playback buttons present in UI
-const btnPlayInput    = firstSel("#play-input","[data-action=play-input]");
-const btnPlayOutput   = firstSel("#play-output","[data-action=play-output]");
+// --- UPDATED --- (Playback controls)
+const audioIn         = firstSel("#audio-in");
+const audioOut        = firstSel("#audio-out");
+const btnPlayInput    = firstSel("#play-input");
+const btnPlayOutput   = firstSel("#play-output");
+const btnSyncReset    = firstSel("#sync-reset");
 
 // ---------- app state ----------
 const state = {
   signalId:null, sr:0, duration:0, nSamples:0,
   scale:"linear", showSpectrograms:true, mode:"generic",
-  subbands:[], customSliders:[],
-  audioCtx:null, inBuffer:null, outBuffer:null, playing:false, playStartTime:0, pausedAt:0, speed:1,
+  subbands:[], // For Generic Mode
+  customSliders:[], // For Customized Modes
+  audioCtx:null, inBuffer:null, outBuffer:null, // old, can be removed if not used by custom draw
   selecting:false, selStartX:0, selEndX:0
 };
 
@@ -73,9 +78,7 @@ function bindUpload(){
   if(btnOpen) btnOpen.addEventListener("click", () => fileInput && fileInput.click());
 
   if(dropZone){
-    // click to browse (كانت ناقصة — سبب المشكلة)
     dropZone.addEventListener("click", () => fileInput && fileInput.click());
-
     ["dragenter","dragover"].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add("drag"); }));
     ["dragleave","drop"].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove("drag"); }));
     dropZone.addEventListener("drop", (e) => {
@@ -94,6 +97,7 @@ async function doUploadFile(file){
   try{
     setStatus(`Uploading: ${file.name} ...`);
     const fd = new FormData(); fd.append("signal", file);
+    // Use the correct URL: /api/upload/
     const res = await apiPost("/api/upload/", fd, false); // server returns JSON
     const j   = typeof res === "object" ? res : JSON.parse(new TextDecoder().decode(res));
     state.signalId = j.signal_id; state.sr = j.sr; state.duration = j.duration; state.nSamples = j.n;
@@ -103,26 +107,30 @@ async function doUploadFile(file){
 }
 
 // ---------- drawing ----------
-function clearCanvas(ctx, cvs){ if(!ctx||!cvs) return; ctx.clearRect(0,0,cvs.width,cvs.height); ctx.fillStyle="#0b0b0f"; ctx.fillRect(0,0,cvs.width,cvs.height); }
+function clearCanvas(ctx, cvs){ if(!ctx||!cvs) return; ctx.clearRect(0,0,cvs.width,cvs.height); ctx.fillStyle="#000000"; ctx.fillRect(0,0,cvs.width,cvs.height); }
 function drawSpectrum(mags,fmax,canvas,ctx,scale="linear"){
   if(!canvas||!ctx||!Array.isArray(mags)) return; clearCanvas(ctx,canvas);
-  const W=canvas.width,H=canvas.height; ctx.strokeStyle="#7fd"; ctx.beginPath(); const N=mags.length;
+  const W=canvas.width,H=canvas.height; ctx.strokeStyle="#d62976"; ctx.beginPath(); const N=mags.length; // Pink
   for(let i=0;i<N;i++){ const x=(i/(N-1))*W; let yv=mags[i]; yv=Math.log10(1+9*yv); const y=H-yv*H; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
   ctx.stroke();
   if(state.mode==="generic" && state.selecting){ const x1=Math.min(state.selStartX,state.selEndX), x2=Math.max(state.selStartX,state.selEndX); ctx.fillStyle="rgba(255,255,255,0.15)"; ctx.fillRect(x1,0,x2-x1,H); }
-  ctx.strokeStyle="#444"; ctx.beginPath(); ctx.moveTo(0,H-0.5); ctx.lineTo(W,H-0.5); ctx.stroke();
+  ctx.strokeStyle="#363636"; ctx.beginPath(); ctx.moveTo(0,H-0.5); ctx.lineTo(W,H-0.5); ctx.stroke();
 }
 function drawWavePreview(canvas,ctx,samples){
   if(!canvas||!ctx||!Array.isArray(samples)) return; clearCanvas(ctx,canvas);
-  const W=canvas.width,H=canvas.height, mid=H/2; ctx.strokeStyle="#8f8"; ctx.beginPath(); const N=samples.length;
+  const W=canvas.width,H=canvas.height, mid=H/2; ctx.strokeStyle="#a8a8a8"; ctx.beginPath(); const N=samples.length; // Muted text color
   for(let i=0;i<N;i++){ const x=(i/(N-1))*W; const y=mid - samples[i]*mid; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
   ctx.stroke();
 }
-function drawImageBase64(canvas,ctx,b64){ const img=new Image(); img.onload=()=>{ canvas.width=img.width; canvas.height=img.height; ctx.drawImage(img,0,0); }; img.src=`data:image/png;base64,${b64}`; }
+function drawImageBase64(canvas,ctx,b64){ const img=new Image(); img.onload=()=>{ canvas.height=img.height; canvas.width=img.width; ctx.drawImage(img,0,0,canvas.width,canvas.height); }; img.src=`data:image/png;base64,${b64}`; }
 
 // ---------- backend refresh ----------
 async function refreshAll(){
   if(!state.signalId) return;
+
+  // --- UPDATED --- Load audio into <audio> elements
+  if(audioIn) audioIn.src = `/api/audio/${state.signalId}/input.wav`;
+  if(audioOut) audioOut.src = `/api/audio/${state.signalId}/output.wav`;
 
   const meta   = await apiGet(`/api/summary/${state.signalId}/`);
   const spec   = await apiGet(`/api/spectrum/${state.signalId}/?scale=${state.scale}`);
@@ -148,6 +156,9 @@ async function refreshAll(){
     if(fs) fs.textContent = meta.sr || "—";
     if(ln) ln.textContent = (meta.duration ?? 0).toFixed(2);
   }
+
+  // --- NEW --- Render sliders based on new mode
+  renderEqSliders();
 }
 
 // ---------- spectrum interaction (generic) ----------
@@ -169,10 +180,19 @@ async function promptBandFromSelection(){
 }
 
 // ---------- equalizer UI ----------
+function renderEqSliders(){
+  if(state.mode === 'generic'){
+    renderGenericSubbands();
+    $('#generic-tools').style.display = 'flex';
+  } else {
+    renderCustomizedSliders();
+    $('#generic-tools').style.display = 'none';
+  }
+}
+
 function renderGenericSubbands(){
   if(!eqPanel) return;
-  let box = eqPanel.querySelector("[data-box=generic-subbands]"); if(!box){ box=document.createElement("div"); box.setAttribute("data-box","generic-subbands"); eqPanel.appendChild(box); }
-  box.innerHTML="";
+  eqPanel.innerHTML=""; // Clear panel
   state.subbands.forEach((b,idx)=>{
     const row=document.createElement("div"); row.className="sb-row";
     row.innerHTML = `
@@ -180,79 +200,219 @@ function renderGenericSubbands(){
       <input type="range" min="0" max="2" step="0.01" value="${b.gain}" data-id="${b.id}"/>
       <span class="sb-gain">${b.gain.toFixed(2)}x</span>
       <button data-act="edit" data-id="${b.id}">Edit</button>
-      <button data-act="del"  data-id="${b.id}">Delete</button>`;
-    box.appendChild(row);
+      <button data-act="del"  data-id="${b.id}" class="btn-danger">Delete</button>`;
+    eqPanel.appendChild(row);
   });
-  box.oninput = async (e)=>{ const r=e.target; if(r.tagName==="INPUT"&&r.type==="range"){ const id=r.dataset.id; const sb=state.subbands.find(s=>s.id===id); if(sb){ sb.gain=+r.value; r.parentElement.querySelector(".sb-gain").textContent=`${sb.gain.toFixed(2)}x`; await applyEqualizerDebounced(); }}};
-  box.onclick  = async (e)=>{ const b=e.target.closest("button"); if(!b) return; const id=b.dataset.id; const sb=state.subbands.find(s=>s.id===id); if(!sb) return;
+  eqPanel.oninput = async (e)=>{ const r=e.target; if(r.tagName==="INPUT"&&r.type==="range"){ const id=r.dataset.id; const sb=state.subbands.find(s=>s.id===id); if(sb){ sb.gain=+r.value; r.parentElement.querySelector(".sb-gain").textContent=`${sb.gain.toFixed(2)}x`; await applyEqualizerDebounced(); }}};
+  eqPanel.onclick  = async (e)=>{ const b=e.target.closest("button"); if(!b) return; const id=b.dataset.id; const sb=state.subbands.find(s=>s.id===id); if(!sb) return;
     if(b.dataset.act==="del"){ state.subbands=state.subbands.filter(s=>s.id!==id); renderGenericSubbands(); await applyEqualizer(); }
     else { const resp=window.prompt(`Edit [min,max,gain]`, `${sb.fmin}, ${sb.fmax}, ${sb.gain}`); if(!resp) return; const p=resp.split(",").map(s=>+s.trim()); if(p.length<3) return; sb.fmin=Math.min(p[0],p[1]); sb.fmax=Math.max(p[0],p[1]); sb.gain=Math.max(0,Math.min(2,p[2])); renderGenericSubbands(); await applyEqualizer(); }
   };
 }
 
-// (customized sliders placeholder — same as قبل)
-function renderCustomizedSliders(){ /* optional in this step */ }
+// --- NEW --- (Function to load and render custom sliders)
+async function renderCustomizedSliders(){
+  if(!eqPanel || !state.signalId) return;
+  eqPanel.innerHTML = "<p>Loading sliders...</p>"; // Clear panel
+
+  try {
+    // Fetch slider definitions from the backend
+    const modeName = state.mode === 'music' ? 'musical instruments' : (state.mode === 'animals' ? 'animal sounds' : 'human voices');
+    const resp = await apiGet(`/api/custom_conf/${state.signalId}/?mode=${modeName}`);
+    state.customSliders = resp.sliders || []; // Store them
+
+    eqPanel.innerHTML = ""; // Clear "Loading"
+
+    if(state.customSliders.length === 0){
+      eqPanel.innerHTML = "<p>No sliders defined for this mode.</p>";
+      return;
+    }
+
+    state.customSliders.forEach((slider, idx) => {
+      const row = document.createElement("div"); row.className = "sb-row";
+      slider.id = `custom${idx}`; // Assign a temporary ID
+      row.innerHTML = `
+        <div class="sb-title">${slider.name}</div>
+        <input type="range" min="0" max="2" step="0.01" value="${slider.gain}" data-id="${slider.id}"/>
+        <span class="sb-gain">${slider.gain.toFixed(2)}x</span>`;
+      eqPanel.appendChild(row);
+    });
+
+    eqPanel.oninput = async (e) => {
+      const r = e.target;
+      if (r.tagName === "INPUT" && r.type === "range") {
+        const id = r.dataset.id;
+        const slider = state.customSliders.find(s => s.id === id);
+        if (slider) {
+          slider.gain = +r.value;
+          r.parentElement.querySelector(".sb-gain").textContent = `${slider.gain.toFixed(2)}x`;
+          await applyEqualizerDebounced();
+        }
+      }
+    };
+    eqPanel.onclick = null; // No edit/delete for custom sliders
+
+  } catch(err) {
+    console.error(err);
+    eqPanel.innerHTML = `<p style="color:var(--danger);">Error loading sliders.</p>`;
+  }
+}
 
 // ---------- apply equalizer ----------
 let eqTimer=null;
 async function applyEqualizerDebounced(){ if(eqTimer) clearTimeout(eqTimer); eqTimer=setTimeout(applyEqualizer,120); }
 async function applyEqualizer(){
   if(!state.signalId) return;
-  const payload = state.mode==="generic" ? {mode:"generic", subbands:state.subbands} : {mode:state.mode, sliders:state.customSliders};
-  try{ await apiPost(`/api/equalize/${state.signalId}/`, payload); await refreshAll(); }
+
+  // --- UPDATED --- (Payload now correctly sends generic or custom)
+  const payload = state.mode==="generic"
+    ? {mode:"generic", subbands:state.subbands}
+    : {mode:state.mode, sliders:state.customSliders};
+
+  try{
+    await apiPost(`/api/equalize/${state.signalId}/`, payload);
+    // Don't refresh all, just wave/spec/audio
+    await refreshOutputs();
+  }
   catch(err){ console.error(err); setStatus(`Equalize error: ${err.message}`); }
 }
+
+// --- NEW --- (Lighter refresh for slider changes)
+async function refreshOutputs(){
+  if(!state.signalId) return;
+
+  // 1. Reload output audio
+  if(audioOut) audioOut.src = `/api/audio/${state.signalId}/output.wav?t=${Date.now()}`; // Cache buster
+
+  // 2. Refresh spectrum, wave previews, and spectrograms
+  const spec   = await apiGet(`/api/spectrum/${state.signalId}/?scale=${state.scale}`);
+  const waves  = await apiGet(`/api/wave_previews/${state.signalId}/`);
+  const specs  = state.showSpectrograms ? await apiGet(`/api/spectrograms/${state.signalId}/`) : null;
+
+  const jSpec  = typeof spec  === "object" ? spec  : JSON.parse(new TextDecoder().decode(spec));
+  const jWaves = typeof waves === "object" ? waves : JSON.parse(new TextDecoder().decode(waves));
+
+  drawSpectrum(jSpec.mags, jSpec.fmax, spectrumCanvas, spectrumCtx, state.scale);
+  drawWavePreview(outputCanvas, outCtx, jWaves.output); // Only redraw output wave
+
+  if(specs){
+    const jSpecs = typeof specs === "object" ? specs : JSON.parse(new TextDecoder().decode(specs));
+    if(specOutCtx && jSpecs.out_png)drawImageBase64(specOutCanvas, specOutCtx, jSpecs.out_png); // Only redraw output spec
+  }
+}
+
 
 // ---------- toggles / mode ----------
 if(btnScaleSwitch) btnScaleSwitch.addEventListener("click", async ()=>{ state.scale = state.scale==="linear" ? "audiogram" : "linear"; btnScaleSwitch.textContent = `Audiogram: ${state.scale==="audiogram"?"On":"Off"}`; await refreshAll(); });
 if(chkShowSpec)   chkShowSpec.addEventListener("change", async e => { state.showSpectrograms = !!e.target.checked; await refreshAll(); });
-if(modeSelect)    modeSelect.addEventListener("change", async e => { state.mode = e.target.value; state.subbands=[]; state.customSliders=[]; await refreshAll(); });
 if(btnAddSubBand) btnAddSubBand.addEventListener("click", ()=> alert("Select an interval on the spectrum by dragging with the mouse."));
+
+// --- NEW --- (Clear Sub-bands button)
+if(btnClearSubBand) btnClearSubBand.addEventListener("click", async ()=>{
+  if(state.mode !== 'generic') return;
+  state.subbands = [];
+  renderGenericSubbands();
+  await applyEqualizer();
+});
+
+// --- UPDATED --- (Mode select handler)
+if(modeSelect)    modeSelect.addEventListener("change", async e => {
+  state.mode = e.target.value;
+  state.subbands=[];
+  state.customSliders=[];
+  renderEqSliders(); // Render new sliders
+  await applyEqualizer(); // Apply (will reset to input)
+});
 
 // ---------- save/load scheme & settings ----------
 if(btnSaveScheme) btnSaveScheme.addEventListener("click", async ()=>{
+  if(!state.signalId) return alert("Upload a signal first.");
   const scheme = state.mode==="generic" ? {mode:"generic", subbands:state.subbands} : {mode:state.mode, sliders:state.customSliders};
   const buf = await apiPost(`/api/save_scheme/${state.signalId}/`, scheme);
   const j   = typeof buf==="object" ? buf : JSON.parse(new TextDecoder().decode(buf));
   downloadBlob(new TextEncoder().encode(JSON.stringify(j.data,null,2)), j.filename, "application/json");
 });
 if(btnLoadScheme) btnLoadScheme.addEventListener("click", async ()=>{
+  if(!state.signalId) return alert("Upload a signal first.");
   const inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
-  inp.onchange=async()=>{ const f=inp.files?.[0]; if(!f) return; const data=JSON.parse(await f.text()); await apiPost(`/api/load_scheme/${state.signalId}/`, data); state.mode=data.mode||"generic"; state.subbands=data.subbands||[]; state.customSliders=data.sliders||[]; if(modeSelect) modeSelect.value=state.mode; await refreshAll(); };
+  inp.onchange=async()=>{ const f=inp.files?.[0]; if(!f) return; const data=JSON.parse(await f.text());
+    await apiPost(`/api/load_scheme/${state.signalId}/`, data);
+    state.mode=data.mode||"generic"; state.subbands=data.subbands||[]; state.customSliders=data.sliders||[];
+    if(modeSelect) modeSelect.value=state.mode;
+    renderEqSliders(); // Render loaded sliders
+    await applyEqualizer();
+  };
   inp.click();
 });
 if(btnSaveSettings) btnSaveSettings.addEventListener("click", async ()=>{
+  if(!state.signalId) return alert("Upload a signal first.");
   const full = { scale:state.scale, showSpectrograms:state.showSpectrograms, ...(state.mode==="generic"?{mode:"generic",subbands:state.subbands}:{mode:state.mode,sliders:state.customSliders}) };
   const buf = await apiPost(`/api/save_settings/${state.signalId}/`, full);
   const j   = typeof buf==="object" ? buf : JSON.parse(new TextDecoder().decode(buf));
   downloadBlob(new TextEncoder().encode(JSON.stringify(j.data,null,2)), j.filename, "application/json");
 });
 if(btnLoadSettings) btnLoadSettings.addEventListener("click", async ()=>{
+  if(!state.signalId) return alert("Upload a signal first.");
   const inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
-  inp.onchange=async()=>{ const f=inp.files?.[0]; if(!f) return; const data=JSON.parse(await f.text()); await apiPost(`/api/load_settings/${state.signalId}/`, data);
+  inp.onchange=async()=>{ const f=inp.files?.[0]; if(!f) return; const data=JSON.parse(await f.text());
+    await apiPost(`/api/load_settings/${state.signalId}/`, data);
     state.scale=data.scale||"linear"; state.showSpectrograms=!!data.showSpectrograms; state.mode=data.mode||"generic"; state.subbands=data.subbands||[]; state.customSliders=data.sliders||[];
-    if(chkShowSpec) chkShowSpec.checked=state.showSpectrograms; if(modeSelect) modeSelect.value=state.mode; await refreshAll(); };
+    if(chkShowSpec) chkShowSpec.checked=state.showSpectrograms; if(modeSelect) modeSelect.value=state.mode;
+    await refreshAll(); // Full refresh for settings
+  };
   inp.click();
 });
 
-// ---------- playback (simple: input/output) ----------
-async function ensureAudioCtx(){ if(!state.audioCtx) state.audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
-async function fetchAudioBuffer(url){ await ensureAudioCtx(); const arr = await apiGet(url); return await state.audioCtx.decodeAudioData(arr.slice(0)); }
-async function prepareBuffers(){ if(!state.signalId) return; if(!state.inBuffer) state.inBuffer = await fetchAudioBuffer(`/api/audio/${state.signalId}/input.wav`); state.outBuffer = await fetchAudioBuffer(`/api/audio/${state.signalId}/output.wav`); }
-let inSrc=null, outSrc=null; function stopSources(){ if(inSrc){ try{inSrc.stop();}catch{} inSrc.disconnect(); inSrc=null; } if(outSrc){ try{outSrc.stop();}catch{} outSrc.disconnect(); outSrc=null; } }
-async function play(which="input"){
-  if(!state.signalId) return; await ensureAudioCtx(); await prepareBuffers(); stopSources();
-  inSrc=state.audioCtx.createBufferSource(); outSrc=state.audioCtx.createBufferSource(); inSrc.buffer=state.inBuffer; outSrc.buffer=state.outBuffer;
-  const gin=state.audioCtx.createGain(), gout=state.audioCtx.createGain(); gin.gain.value=which==="input"?1:0; gout.gain.value=which==="output"?1:0;
-  inSrc.connect(gin).connect(state.audioCtx.destination); outSrc.connect(gout).connect(state.audioCtx.destination); inSrc.start(0); outSrc.start(0);
+// --- UPDATED --- (Re-written for linked <audio> elements)
+function bindPlayback(){
+  if(!audioIn || !audioOut) return;
+
+  let syncLock = false; // Prevents seek event loops
+
+  const sync = (master, slave) => {
+    if(syncLock) return;
+    syncLock = true;
+    slave.currentTime = master.currentTime;
+    syncLock = false;
+  };
+
+  const syncPlay = (master, slave) => {
+    if(syncLock) return;
+    sync(master, slave);
+    slave.play();
+  };
+
+  const syncPause = (master, slave) => {
+    if(syncLock) return;
+    slave.pause();
+  };
+
+  // Link seeking
+  audioIn.addEventListener("seeked", () => sync(audioIn, audioOut));
+  audioOut.addEventListener("seeked", () => sync(audioOut, audioIn));
+
+  // Link Play/Pause
+  audioIn.addEventListener("play", () => syncPlay(audioIn, audioOut));
+  audioOut.addEventListener("play", () => syncPlay(audioOut, audioIn));
+  audioIn.addEventListener("pause", () => syncPause(audioIn, audioOut));
+  audioOut.addEventListener("pause", () => syncPause(audioOut, audioIn));
+
+  // Wire up transport buttons
+  if(btnPlayInput)  btnPlayInput.addEventListener("click", () => audioIn.play());
+  if(btnPlayOutput) btnPlayOutput.addEventListener("click", () => audioOut.play());
+  if(btnSyncReset)  btnSyncReset.addEventListener("click", () => {
+    audioIn.pause();
+    audioOut.pause();
+    audioIn.currentTime = 0;
+    audioOut.currentTime = 0;
+  });
 }
-if(btnPlayInput)  btnPlayInput.addEventListener("click", ()=>play("input"));
-if(btnPlayOutput) btnPlayOutput.addEventListener("click", ()=>play("output"));
 
 // ---------- init ----------
 function init(){
   bindUpload();
   bindSpectrumSelection();
+  bindPlayback(); // --- NEW ---
   setStatus("Ready.");
 }
 document.addEventListener("DOMContentLoaded", init);
