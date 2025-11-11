@@ -9,7 +9,6 @@
 </head>
 <body>
 
-<!-- [1] Header / Toolbar -->
 <header class="topbar">
   <div class="brand">Signal Equalizer</div>
 
@@ -40,17 +39,15 @@
   </div>
 </header>
 
-<!-- [0] Drag & Drop uploader -->
+{% block content %}
 <section class="uploader">
   <div id="drop-zone" class="drop">
     <div class="hint">Drag & drop an audio file here<br>or click to browse</div>
   </div>
 </section>
 
-<!-- [2] Workspace Layout -->
 <main class="workspace">
 
-  <!-- [3] Left: Equalizer -->
   <aside class="left-panel">
     <div class="panel-title">
       <span>Equalizer</span>
@@ -70,13 +67,11 @@
     <div id="eq-sliders" class="sliders"></div>
   </aside>
 
-  <!-- [4] Center: Spectrum -->
   <section class="center-panel">
     <div class="panel-title">Spectrum (click & drag in Generic mode to create band)</div>
     <canvas id="fft-canvas" width="1200" height="260"></canvas>
   </section>
 
-  <!-- [7] AI Panel (collapsible) -->
   <aside id="ai-panel" class="right-panel hidden">
     <div class="panel-title">AI Models</div>
     <div class="tool-row">
@@ -94,7 +89,6 @@
 
 </main>
 
-<!-- [5] Linked Time-Domain Viewers + [6] Spectrograms -->
 <section class="bottom-panels">
   <div class="twocol">
     <div>
@@ -117,8 +111,8 @@
     <span id="status"></span>
   </div>
 </section>
+{% endblock %}
 
-<!-- [8] Status Bar -->
 <footer class="statusbar" id="statusbar">
   File: <span id="sb-file">—</span> |
   Fs: <span id="sb-fs">—</span> |
