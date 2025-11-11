@@ -330,3 +330,21 @@ input[type=range]:hover::-moz-range-track {
   color: var(--text-light);
   font-weight: 600;
 }
+
+/* --- NEW LOADER STYLES --- */
+.loader-bar {
+  width: 100%;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: var(--insta-gradient);
+  background-size: 200% auto;
+  animation: loader-anim 1.2s linear infinite;
+}
+.loader-bar.hidden {
+  display: none;
+}
+@keyframes loader-anim {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}

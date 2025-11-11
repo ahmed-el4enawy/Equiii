@@ -27,6 +27,7 @@ const eqPanel         = firstSel("#eq-sliders");
 
 const spectrumCanvas  = firstSel("#fft-canvas");
 const spectrumCtx     = spectrumCanvas ? spectrumCanvas.getContext("2d") : null;
+const spectrumLoader  = firstSel("#spectrum-loader");
 
 const inputCanvas     = firstSel("#wave-in");
 const outputCanvas    = firstSel("#wave-out");
@@ -52,6 +53,7 @@ const btnSyncReset    = firstSel("#sync-reset");
 // ---------- app state ----------
 const state = {
   signalId:null, sr:0, duration:0, nSamples:0, fmax:0,
+  spectrumMags: [],
   scale:"linear", showSpectrograms:true, mode:"generic",
   subbands:[], // For Generic Mode
   customSliders:[], // For Customized Modes
@@ -94,25 +96,61 @@ function bindUpload(){
 async function doUploadFile(file){
   try{
     setStatus(`Uploading: ${file.name} ...`);
+    if(spectrumLoader) spectrumLoader.classList.remove("hidden");
     const fd = new FormData(); fd.append("signal", file);
     const res = await apiPost("/api/upload/", fd, false); // server returns JSON
     const j   = typeof res === "object" ? res : JSON.parse(new TextDecoder().decode(res));
     state.signalId = j.signal_id; state.sr = j.sr; state.duration = j.duration; state.nSamples = j.n;
     setStatus(`Loaded ${j.file_name} — sr=${j.sr}Hz, len=${j.duration.toFixed(2)}s`);
     await refreshAll();
-  }catch(err){ console.error(err); setStatus(`Upload error: ${err.message}`); }
+  }catch(err){
+    console.error(err);
+    setStatus(`Upload error: ${err.message}`);
+    if(spectrumLoader) spectrumLoader.classList.add("hidden");
+  }
 }
 
 // ---------- drawing ----------
 function clearCanvas(ctx, cvs){ if(!ctx||!cvs) return; ctx.clearRect(0,0,cvs.width,cvs.height); ctx.fillStyle="#000000"; ctx.fillRect(0,0,cvs.width,cvs.height); }
+
+// ---
+// --- THIS FUNCTION IS NOW FIXED ---
+// ---
 function drawSpectrum(mags,fmax,canvas,ctx,scale="linear"){
-  if(!canvas||!ctx||!Array.isArray(mags)) return; clearCanvas(ctx,canvas);
-  const W=canvas.width,H=canvas.height; ctx.strokeStyle="#d62976"; ctx.beginPath(); const N=mags.length; // Pink
-  for(let i=0;i<N;i++){ const x=(i/(N-1))*W; let yv=mags[i]; yv=Math.log10(1+9*yv); const y=H-yv*H; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+  if(!canvas||!ctx||!Array.isArray(mags)) return;
+  clearCanvas(ctx,canvas);
+
+  const W=canvas.width, H=canvas.height;
+  ctx.strokeStyle="#d62976"; // Pink
+  ctx.beginPath();
+  const N=mags.length;
+
+  for(let i=0;i<N;i++){
+    const x = (i/(N-1)) * W;
+    let yv = mags[i]; // This is already 0-1 and log-scaled
+
+    // yv=Math.log10(1+9*yv); // <-- THIS WAS THE BUG. REMOVED.
+
+    const y = H - (yv * H); // Directly map 0-1 to canvas height
+
+    if(i===0) ctx.moveTo(x,y);
+    else ctx.lineTo(x,y);
+  }
   ctx.stroke();
-  if(state.mode==="generic" && state.selecting){ const x1=Math.min(state.selStartX,state.selEndX), x2=Math.max(state.selStartX,state.selEndX); ctx.fillStyle="rgba(255,255,255,0.15)"; ctx.fillRect(x1,0,x2-x1,H); }
-  ctx.strokeStyle="#363636"; ctx.beginPath(); ctx.moveTo(0,H-0.5); ctx.lineTo(W,H-0.5); ctx.stroke();
+
+  if(state.mode==="generic" && state.selecting){
+    const x1=Math.min(state.selStartX,state.selEndX), x2=Math.max(state.selStartX,state.selEndX);
+    ctx.fillStyle="rgba(214, 41, 118, 0.25)";
+    ctx.fillRect(x1,0,x2-x1,H);
+  }
+
+  ctx.strokeStyle="#363636";
+  ctx.beginPath();
+  ctx.moveTo(0,H-0.5);
+  ctx.lineTo(W,H-0.5);
+  ctx.stroke();
 }
+
 function drawWavePreview(canvas,ctx,samples){
   if(!canvas||!ctx||!Array.isArray(samples)) return; clearCanvas(ctx,canvas);
   const W=canvas.width,H=canvas.height, mid=H/2; ctx.strokeStyle="#a8a8a8"; ctx.beginPath(); const N=samples.length; // Muted text color
@@ -124,6 +162,7 @@ function drawImageBase64(canvas,ctx,b64){ const img=new Image(); img.onload=()=>
 // ---------- backend refresh ----------
 async function refreshAll(){
   if(!state.signalId) return;
+  if(spectrumLoader) spectrumLoader.classList.remove("hidden");
 
   if(audioIn) audioIn.src = `/api/audio/${state.signalId}/input.wav`;
   if(audioOut) audioOut.src = `/api/audio/${state.signalId}/output.wav`;
@@ -137,7 +176,10 @@ async function refreshAll(){
   const jWaves = typeof waves === "object" ? waves : JSON.parse(new TextDecoder().decode(waves));
 
   state.fmax = jSpec.fmax;
+  state.spectrumMags = jSpec.mags;
   drawSpectrum(jSpec.mags, jSpec.fmax, spectrumCanvas, spectrumCtx, state.scale);
+  if(spectrumLoader) spectrumLoader.classList.add("hidden");
+
   drawWavePreview(inputCanvas, inCtx, jWaves.input);
   drawWavePreview(outputCanvas, outCtx, jWaves.output);
 
@@ -174,7 +216,12 @@ function bindSpectrumSelection(){
     }
   });
 }
-function redrawSpectrum(){ if(!state.signalId) return; apiGet(`/api/spectrum/${state.signalId}/?scale=${state.scale}`).then(buf=>{ const j=typeof buf==="object"?buf:JSON.parse(new TextDecoder().decode(buf)); state.fmax = j.fmax; drawSpectrum(j.mags,j.fmax,spectrumCanvas,spectrumCtx,state.scale); }).catch(()=>{}); }
+
+function redrawSpectrum(){
+  if(!state.signalId || !state.spectrumMags) return;
+  drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx, state.scale);
+}
+
 function pxToFreq(x,W,fmax){ const frac=Math.min(1,Math.max(0,x/W)); return frac*fmax; }
 async function promptBandFromSelection(){
   const W = spectrumCanvas.width;
@@ -273,25 +320,34 @@ async function applyEqualizer(){
     : {mode:state.mode, sliders:state.customSliders};
 
   try{
+    if(spectrumLoader) spectrumLoader.classList.remove("hidden");
     await apiPost(`/api/equalize/${state.signalId}/`, payload);
     await refreshOutputs();
   }
-  catch(err){ console.error(err); setStatus(`Equalize error: ${err.message}`); }
+  catch(err){
+    console.error(err);
+    setStatus(`Equalize error: ${err.message}`);
+    if(spectrumLoader) spectrumLoader.classList.add("hidden");
+  }
 }
 
 async function refreshOutputs(){
   if(!state.signalId) return;
 
-  if(audioOut) audioOut.src = `/api/audio/${state.signalId}/output.wav?t=${Date.now()}`;
+  if(spectrumLoader) spectrumLoader.classList.remove("hidden");
 
-  const spec   = await apiGet(`/api/spectrum/${state.signalId}/?scale=${state.scale}`);
-  const waves  = await apiGet(`/api/wave_previews/${state.signalId}/`);
-  const specs  = state.showSpectrograms ? await apiGet(`/api/spectrograms/${state.signalId}/`) : null;
+  const audioReload = audioOut.src = `/api/audio/${state.signalId}/output.wav?t=${Date.now()}`;
+  const specPromise = apiGet(`/api/spectrum/${state.signalId}/?scale=${state.scale}`);
+  const wavesPromise = apiGet(`/api/wave_previews/${state.signalId}/`);
+  const specsPromise = state.showSpectrograms ? apiGet(`/api/spectrograms/${state.signalId}/`) : Promise.resolve(null);
+
+  const [spec, waves, specs] = await Promise.all([specPromise, wavesPromise, specsPromise]);
 
   const jSpec  = typeof spec  === "object" ? spec  : JSON.parse(new TextDecoder().decode(spec));
   const jWaves = typeof waves === "object" ? waves : JSON.parse(new TextDecoder().decode(waves));
 
   state.fmax = jSpec.fmax;
+  state.spectrumMags = jSpec.mags;
   drawSpectrum(jSpec.mags, jSpec.fmax, spectrumCanvas, spectrumCtx, state.scale);
   drawWavePreview(outputCanvas, outCtx, jWaves.output);
 
@@ -299,6 +355,8 @@ async function refreshOutputs(){
     const jSpecs = typeof specs === "object" ? specs : JSON.parse(new TextDecoder().decode(specs));
     if(specOutCtx && jSpecs.out_png)drawImageBase64(specOutCanvas, specOutCtx, jSpecs.out_png);
   }
+
+  if(spectrumLoader) spectrumLoader.classList.add("hidden");
 }
 
 
@@ -380,62 +438,27 @@ function bindSaveLoad(){
   });
 }
 
-// --- UPDATED --- (Bug fix for playback buttons)
+// ---------- playback ----------
 function bindPlayback(){
   if(!audioIn || !audioOut) return;
 
-  let isSyncing = false; // Robust lock
-
-  const syncPlayers = (master, slave) => {
-    if (isSyncing) return; // Don't sync if a sync is already in progress
-    isSyncing = true;
-    slave.currentTime = master.currentTime;
-    if (master.paused) {
-      slave.pause();
-    } else {
-      slave.play().catch(() => {}); // Play slave, ignore errors
-    }
-    // Release lock after a tiny delay to prevent event bouncing
-    setTimeout(() => { isSyncing = false; }, 50);
-  };
-
-  // Link controls on the <audio> elements themselves
-  // These are for when the user clicks the play/pause/seek on the element
-  audioIn.addEventListener("seeked", () => syncPlayers(audioIn, audioOut));
-  audioOut.addEventListener("seeked", () => syncPlayers(audioOut, audioIn));
-  audioIn.addEventListener("play", () => syncPlayers(audioIn, audioOut));
-  audioOut.addEventListener("play", () => syncPlayers(audioOut, audioIn));
-  audioIn.addEventListener("pause", () => syncPlayers(audioIn, audioOut));
-  audioOut.addEventListener("pause", () => syncPlayers(audioOut, audioIn));
-  audioIn.addEventListener("ratechange", () => { audioOut.playbackRate = audioIn.playbackRate; });
-  audioOut.addEventListener("ratechange", () => { audioIn.playbackRate = audioOut.playbackRate; });
-
-  // --- NEW BUTTON LOGIC ---
-  // These buttons will play *only* one at a time
-  // by temporarily disabling sync.
+  // --- Players are now independent ---
 
   if(btnPlayInput)  btnPlayInput.addEventListener("click", () => {
-    isSyncing = true; // Disable sync
-    audioOut.pause();
+    audioOut.pause(); // Pause the other player
     audioIn.play();
-    setTimeout(() => { isSyncing = false; }, 50); // Re-enable sync
   });
 
   if(btnPlayOutput) btnPlayOutput.addEventListener("click", () => {
-    isSyncing = true; // Disable sync
-    audioIn.pause();
+    audioIn.pause(); // Pause the other player
     audioOut.play();
-    setTimeout(() => { isSyncing = false; }, 50); // Re-enable sync
   });
 
-  // Reset button
   if(btnSyncReset)  btnSyncReset.addEventListener("click", () => {
-    isSyncing = true; // Prevent events
     audioIn.pause();
     audioOut.pause();
     audioIn.currentTime = 0;
     audioOut.currentTime = 0;
-    isSyncing = false;
   });
 }
 

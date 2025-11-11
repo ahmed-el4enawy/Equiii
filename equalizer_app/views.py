@@ -125,17 +125,31 @@ def summary(request, sid):
     return _resp_json(resp)
 
 
+# ---
+# --- THIS FUNCTION IS NOW OPTIMIZED ---
+# ---
 def _compute_spectrum(x: np.ndarray, sr: int, scale: str):
-    # --- THIS FUNCTION IS NOW OPTIMIZED ---
-    # Compute the STFT (spectrogram)
+    """
+    Calculates the *average* magnitude spectrum.
+    This is much faster and smoother than an FFT of the whole file.
+    """
     # S is a 2D array: (frequency_bins, time_frames)
     S = stft_spectrogram(x, sr)
+
+    if S.size == 0:
+        # Handle very short files that produce no frames
+        nfft = 1
+        while nfft < int(sr * 25 / 1000): nfft <<= 1  # Recreate default nfft
+        return [0.0] * (nfft // 2), sr / 2.0
 
     # The "average spectrum" is the mean across all time frames
     mag = np.mean(S, axis=1)
 
     # Normalize
-    mag = mag / (mag.max() + 1e-12)
+    mag_max = mag.max()
+    if mag_max > 1e-12:
+        mag = mag / mag_max
+
     fmax = sr / 2.0
 
     if scale == "audiogram":
@@ -149,7 +163,9 @@ def spectrum(request, sid):
     meta = REG.get(sid)
     if not meta: return HttpResponseBadRequest("Invalid id")
     scale = request.GET.get("scale", "linear")
-    mags, fmax = _compute_spectrum(meta.get("output_x", meta["input_x"]), meta["sr"], scale)
+    # Get output_x, fall back to input_x
+    x_data = meta.get("output_x", meta["input_x"])
+    mags, fmax = _compute_spectrum(x_data, meta["sr"], scale)
     return _resp_json({"mags": mags, "fmax": fmax})
 
 
@@ -175,7 +191,12 @@ def spectrograms(request, sid):
     def to_png_b64(S):
         # normalize
         Sm = S - S.min()
-        Sm = Sm / (Sm.max() + 1e-12)
+        s_max = Sm.max()
+        if s_max < 1e-12:
+            Sm = np.zeros_like(Sm)
+        else:
+            Sm = Sm / s_max
+
         img = (Sm * 255).astype(np.uint8)
         im = Image.fromarray(img[::-1, :], mode="L")
         buf = io.BytesIO()
@@ -240,6 +261,8 @@ def equalize(request, sid):
             kmax = int(fmax / (sr / n2))
             kmin = max(0, min(kmin, n2 // 2 - 1))
             kmax = max(0, min(kmax, n2 // 2 - 1))
+            if kmax < kmin:
+                continue
             # mirror bins for Hermitian symmetry (real signal)
             X[kmin:kmax + 1] *= gain
             if kmin > 0:
