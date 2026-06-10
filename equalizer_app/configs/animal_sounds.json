@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Pigeon",
+    "gain": 1.0,
+    "windows": [
+      {"fmin": 0, "fmax": 590}
+    ]
+  },
+  {
+    "name": "Frog",
+    "gain": 1.0,
+    "windows": [
+      {"fmin": 590, "fmax": 2500}
+    ]
+  },
+  {
+    "name": "Cricket",
+    "gain": 1.0,
+    "windows": [
+      {"fmin":2700, "fmax": 5000}
+    ]
+  },
+  {
+    "name": "Other",
+    "gain": 1.0,
+    "windows": [
+      {"fmin": 4700, "fmax": 20000}
+    ]
+  }
+]
