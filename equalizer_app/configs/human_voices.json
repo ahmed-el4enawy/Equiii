@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Speaker 1",
+    "gain": 1.0,
+    "windows": [
+      {
+        "fmin": 0,
+        "fmax": 5000
+      }
+    ]
+  },
+  {
+    "name": "Speaker 2",
+    "gain": 1.0,
+    "windows": [
+      {
+        "fmin": 0,
+        "fmax": 3500
+      }
+    ]
+  },
+  {
+    "name": "Speaker 3",
+    "gain": 1.0,
+    "windows": [
+      {
+        "fmin": 0,
+        "fmax": 2000
+      }
+    ]
+  },
+  {
+    "name": "Speaker 4",
+    "gain": 1.0,
+    "windows": [
+      {
+        "fmin": 0,
+        "fmax": 4500
+      }
+    ]
+  }
+]
