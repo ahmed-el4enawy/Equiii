@@ -144,3 +144,73 @@ def upload_signal(request):
     _make_output_for_signal(sid)
     return _resp_json(
         {"signal_id": sid, "file_name": f.name, "sr": int(sr), "n": int(x.size), "duration": float(x.size / sr)})
+
+
+def summary(request, sid):
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+    return _resp_json(
+        {"file_name": meta["file_name"], "sr": meta["sr"], "duration": float(meta["input_x"].size / meta["sr"])})
+
+
+def spectrum(request, sid):
+    # PURE C++ IMPLEMENTATION
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+    scale = request.GET.get("scale", "linear")
+
+    x_data = meta.get("output_x", meta["input_x"])
+    padded_x = _pad_signal(x_data)
+
+    # Call C++ to get visualization magnitudes
+    mags, fmax = fft_bridge.get_spectrum_data(padded_x, meta["sr"], scale)
+
+    return _resp_json({"mags": mags, "fmax": fmax})
+
+
+def wave_previews(request, sid):
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+
+    def downsample(x, target=2000):
+        if x.size <= target: return x.tolist()
+        idx = np.linspace(0, x.size - 1, target).astype(np.int64)
+        return x[idx].tolist()
+
+    return _resp_json({
+        "input": downsample(meta["input_x"]),
+        "output": downsample(meta.get("output_x", meta["input_x"]))
+    })
+
+
+def spectrograms(request, sid):
+    # PURE C++ IMPLEMENTATION
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+    sr = meta["sr"]
+
+    import PIL.Image as Image
+
+    def generate_png(x_sig):
+        # Call C++ Bridge
+        _, _, S = fft_bridge.get_spectrogram_matrix(x_sig, sr)
+
+        if S.size == 0: return ""
+
+        # Log scaling for visualization
+        S_log = np.log1p(S * 1000)
+        s_min, s_max = S_log.min(), S_log.max()
+        S_norm = (S_log - s_min) / (s_max - s_min) if (s_max - s_min > 1e-9) else np.zeros_like(S_log)
+
+        # Flip Y-axis (low freq at bottom)
+        img_data = (S_norm * 255).astype(np.uint8)[::-1, :]
+
+        im = Image.fromarray(img_data, mode="L")
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return _resp_json({
+        "in_png": generate_png(meta["input_x"]),
+        "out_png": generate_png(meta.get("output_x", meta["input_x"]))
+    })
