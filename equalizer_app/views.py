@@ -214,3 +214,85 @@ def spectrograms(request, sid):
         "in_png": generate_png(meta["input_x"]),
         "out_png": generate_png(meta.get("output_x", meta["input_x"]))
     })
+
+
+def custom_conf(request, sid):
+    mode = request.GET.get("mode", "generic").lower()
+    sliders = []
+    filename = ""
+    if "animal" in mode:
+        filename = "animal_sounds.json"
+    elif "music" in mode:
+        filename = "musical_instruments.json"
+    elif "human" in mode:
+        filename = "human_voices.json"
+
+    if filename:
+        json_path = os.path.join(CONFIG_DIR, filename)
+        if os.path.exists(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                sliders = json.load(f)
+    return _resp_json({"sliders": sliders})
+
+
+@csrf_exempt
+def equalize(request, sid):
+    # PURE C++ IMPLEMENTATION
+    if request.method != "POST": return HttpResponseBadRequest("POST only")
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+
+    body = json.loads(request.body.decode("utf-8"))
+    mode = body.get("mode", "generic")
+
+    # 1. AI Mixing Mode (Summation)
+    if mode == "ai_mix":
+        gains = body.get("gains", {})
+        stems = meta.get("stem_data", {})
+        input_len = len(meta["input_x"])
+        mixed_signal = np.zeros(input_len, dtype=np.float32)
+
+        for name, arr in stems.items():
+            g = float(gains.get(name, 0.0))
+            if g > 0:
+                l = min(len(mixed_signal), len(arr))
+                mixed_signal[:l] += arr[:l] * g
+
+        REG[sid]["output_x"] = mixed_signal
+        _make_output_for_signal(sid)
+        return _resp_json({"ok": True})
+
+    # 2. Spectral EQ Mode (C++)
+    # Collect all bands to apply
+    bands_to_apply = []
+
+    if mode == "generic":
+        subs = body.get("subbands", [])
+        REG[sid]["subbands"] = subs
+        # Generic subbands: {fmin, fmax, gain}
+        for s in subs:
+            bands_to_apply.append({"fmin": s["fmin"], "fmax": s["fmax"], "gain": s["gain"]})
+    else:
+        sliders = body.get("sliders", [])
+        REG[sid]["custom_sliders"] = sliders
+        # Custom sliders: list of windows
+        for s in sliders:
+            gain = float(s.get("gain", 1.0))
+            for w in s.get("windows", []):
+                bands_to_apply.append({"fmin": w["fmin"], "fmax": w["fmax"], "gain": gain})
+
+    # Prepare signal (pad to power of 2 for C++ FFT)
+    x_input = meta["input_x"]
+    x_padded = _pad_signal(x_input)
+
+    # EXECUTE C++ FILTER
+    if len(bands_to_apply) > 0:
+        x_out_padded = fft_bridge.process_equalizer(x_padded, meta["sr"], bands_to_apply)
+    else:
+        x_out_padded = x_padded.copy()
+
+    # Crop padding back to original length
+    REG[sid]["output_x"] = x_out_padded[:x_input.size]
+
+    _make_output_for_signal(sid)
+    return _resp_json({"ok": True})
