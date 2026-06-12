@@ -296,3 +296,162 @@ def equalize(request, sid):
 
     _make_output_for_signal(sid)
     return _resp_json({"ok": True})
+
+
+@csrf_exempt
+def run_ai(request, sid):
+    # This invokes the orchestrator (external process manager)
+    if request.method != "POST": return HttpResponseBadRequest("POST only")
+    meta = REG.get(sid)
+    if not meta: return HttpResponseBadRequest("Invalid id")
+
+    body = json.loads(request.body.decode("utf-8"))
+    mode = body.get("mode", "music")
+
+    orchestrator = AIOrchestrator()
+    input_path = os.path.join(DATA_DIR, sid, meta["file_name"])
+
+    # Target Sample Rate (project SR)
+    target_sr = meta["sr"]
+
+    try:
+        # === MUSIC MODE ===
+        if mode == "music":
+            output_dir = os.path.join(DATA_DIR, sid, "stems")
+            result = orchestrator.separate_music(input_path, output_dir)
+
+            meta["stem_data"] = {}
+            stem_names = []
+
+            stems_map = result.get("stems", {})
+            for name, path in stems_map.items():
+                if os.path.exists(path):
+                    file_sr, x = _read_wav(path)
+
+                    # Resample logic (naive linear interp if needed, strictly in Python for now as it's not FFT)
+                    # For full C++ purity, resampling could be moved to C++ too, but it's time-domain.
+                    if file_sr != target_sr:
+                        # Simple resampling
+                        duration = x.size / file_sr
+                        target_len = int(duration * target_sr)
+                        x = np.interp(
+                            np.linspace(0, x.size - 1, target_len),
+                            np.arange(x.size),
+                            x
+                        ).astype(np.float32)
+
+                    meta["stem_data"][name] = x
+                    stem_names.append(name)
+
+            meta["ai_active"] = True
+            return _resp_json({"status": "ok", "stems": stem_names})
+
+        # === HUMAN MODE (Speaker Separation) ===
+        elif mode == "human":
+            output_dir = os.path.join(settings.BASE_DIR, "equalizer_app", "ai_models", "human", "output")
+
+            # Cleanup old files
+            if os.path.exists(output_dir):
+                for filename in os.listdir(output_dir):
+                    file_path = os.path.join(output_dir, filename)
+                    try:
+                        if os.path.isfile(file_path): os.unlink(file_path)
+                    except:
+                        pass
+            else:
+                os.makedirs(output_dir, exist_ok=True)
+
+            result = orchestrator.separate_human_voices(input_path, output_dir)
+
+            meta["stem_data"] = {}
+            stem_names = []
+            target_speakers_map = {1: "speaker 1", 2: "speaker 2", 3: "speaker 3", 4: "speaker 4"}
+
+            detected_files = {}
+            if "speakers" in result:
+                for spk in result["speakers"]:
+                    detected_files[spk["id"]] = spk["filename"]
+
+            input_len = len(meta["input_x"])
+
+            for i in range(1, 5):
+                key = target_speakers_map[i]
+                stem_names.append(key)
+
+                if i in detected_files:
+                    fname = detected_files[i]
+                    fpath = os.path.join(output_dir, fname)
+
+                    if os.path.exists(fpath):
+                        file_sr, x = _read_wav(fpath)
+                        # Resample
+                        if file_sr != target_sr:
+                            duration = x.size / file_sr
+                            target_len = int(duration * target_sr)
+                            x = np.interp(
+                                np.linspace(0, x.size - 1, target_len),
+                                np.arange(x.size),
+                                x
+                            ).astype(np.float32)
+
+                        meta["stem_data"][key] = x
+                    else:
+                        meta["stem_data"][key] = np.zeros(input_len, dtype=np.float32)
+                else:
+                    meta["stem_data"][key] = np.zeros(input_len, dtype=np.float32)
+
+            meta["ai_active"] = True
+            return _resp_json({"status": "ok", "stems": stem_names})
+
+    except Exception as e:
+        print(f"AI Separation Error: {e}")
+        return _resp_json({"status": "error", "message": str(e)})
+
+    return _resp_json({"status": "error", "message": f"Mode '{mode}' not supported for AI separation"})
+
+
+@csrf_exempt
+def save_scheme(request, sid):
+    body = json.loads(request.body.decode("utf-8"))
+    return _resp_json({"filename": f"scheme_{sid}.json", "data": body})
+
+
+@csrf_exempt
+def load_scheme(request, sid):
+    body = json.loads(request.body.decode("utf-8"))
+    REG[sid].update({"mode": body.get("mode", "generic"), "subbands": body.get("subbands", []),
+                     "custom_sliders": body.get("sliders", [])})
+    return _resp_json({"ok": True})
+
+
+@csrf_exempt
+def save_settings(request, sid):
+    body = json.loads(request.body.decode("utf-8"))
+    return _resp_json({"filename": f"settings_{sid}.json", "data": body})
+
+
+@csrf_exempt
+def load_settings(request, sid):
+    body = json.loads(request.body.decode("utf-8"))
+    REG[sid].update({"scale": body.get("scale", "linear"), "show_spec": True, "mode": body.get("mode", "generic"),
+                     "subbands": body.get("subbands", []), "custom_sliders": body.get("sliders", [])})
+    return _resp_json({"ok": True})
+
+
+def audio_input(request, sid):
+    meta = REG[sid]
+    buf = io.BytesIO()
+    _write_wav(buf, meta["sr"], meta["input_x"])
+    return HttpResponse(buf.getvalue(), content_type="audio/wav")
+
+
+def audio_output(request, sid):
+    meta = REG[sid]
+    buf = io.BytesIO()
+    _write_wav(buf, meta["sr"], meta.get("output_x", meta["input_x"]))
+    return HttpResponse(buf.getvalue(), content_type="audio/wav")
+
+
+@csrf_exempt
+def ai_run(request, sid):
+    return _resp_json({"model": "demo", "sliders": [], "stems": []})
