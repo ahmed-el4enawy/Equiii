@@ -128,3 +128,254 @@ canvas {
   align-items: center;
 }
 
+/* [4] Buttons & Controls */
+button, .file-btn span, select {
+  background: var(--bg-dark);
+  color: var(--text-light);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+button:hover, .file-btn span:hover, select:hover {
+  border-color: var(--primary);
+  background: #222222;
+}
+
+button:disabled, button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+  pointer-events: none;
+}
+
+.file-btn.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.btn-primary, #btn-run-ai {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.btn-danger, #btn-clear-subband {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.tool-row { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+.tool-row.single-line { flex-wrap: nowrap; width: 100%; }
+.eq-btn-group { gap: 6px; }
+.eq-btn-group > button, .eq-btn-group > .file-btn > span {
+    flex: 1; text-align: center; white-space: nowrap; display: flex;
+    align-items: center; justify-content: center; padding: 6px 4px; font-size: 12px; height: 36px;
+}
+
+/* [5] Uploader */
+.uploader { padding: 20px; }
+.drop {
+  border: 3px dashed var(--border-color);
+  border-radius: 12px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-bg);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.drop.drag, .drop:hover {
+  border-image-slice: 1;
+  border-image-source: var(--insta-gradient);
+  background: var(--bg-dark);
+  box-shadow: 0 0 25px var(--primary-glow);
+}
+.hint { color: var(--text-muted); text-align: center; font-size: 1.1em; font-weight: 600; }
+
+/* [6] Workspace Layout */
+.workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr 0px;
+  gap: 20px;
+  padding: 0 20px;
+  align-items: stretch;
+}
+.workspace.ai-visible { grid-template-columns: 320px 1fr 320px; }
+
+.bottom-panels { padding: 20px; }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.sync-controls {
+  display: flex; gap: 12px; align-items: center;
+  margin-top: 20px; padding: 16px;
+}
+
+/* [7] Sliders */
+.sliders {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.sliders::-webkit-scrollbar { width: 6px; }
+.sliders::-webkit-scrollbar-track { background: var(--bg-dark); border-radius: 3px; }
+.sliders::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+.sliders::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+.sb-row {
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+.sb-title { font-weight: 600; color: var(--text-light); margin-bottom: 10px; }
+.sb-gain { font-family: var(--font-mono); color: var(--primary); font-weight: 700; margin-left: 12px; }
+input[type=range] { width: 100%; -webkit-appearance: none; background: transparent; margin: 8px 0; }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; height: 18px; width: 18px;
+  border-radius: 50%; background: var(--primary); cursor: pointer; margin-top: -6.5px;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  width: 100%; height: 5px; cursor: pointer; background: var(--border-color); border-radius: 3px;
+}
+
+/* [8] Spectrogram Containers */
+.spectrogram-container {
+  position: relative;
+  padding: 15px;
+}
+.spec-wrapper {
+  position: relative;
+  width: 100%;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* === NEW: AI Switch Styles === */
+.ai-switch-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.ai-switch {
+  position: relative;
+  display: flex;
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px;
+  overflow: hidden;
+  height: 32px;
+}
+
+.ai-switch input[type="radio"] {
+  display: none;
+}
+
+.ai-switch label {
+  position: relative;
+  z-index: 2;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 26px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s ease;
+  user-select: none;
+}
+
+.ai-switch input[type="radio"]:checked + label {
+  color: #fff;
+}
+
+.switch-selection {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: 50%;
+  background: var(--primary);
+  border-radius: 4px;
+  z-index: 1;
+  transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Transform logic for the switch background */
+#mode-custom:checked ~ .switch-selection {
+  transform: translateX(0%);
+  width: calc(50% - 2px);
+}
+
+#mode-ai:checked ~ .switch-selection {
+  transform: translateX(100%);
+  width: calc(50% - 2px);
+  background: var(--insta-orange);
+}
+
+/* === Loading Bar === */
+.loader-bar {
+  width: 100%; height: 4px;
+  background: var(--insta-gradient);
+  background-size: 200% auto;
+  animation: loader-anim 1.2s linear infinite;
+  margin-top: 5px; /* Added margin for spacing under canvas */
+}
+.loader-bar.hidden { display: none; }
+@keyframes loader-anim { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+
+/* [9] Toggle Switches */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    filter: grayscale(100%);
+    cursor: not-allowed;
+}
+
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider-round {
+  position: relative;
+  width: 40px; height: 20px;
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  transition: .4s;
+  display: inline-block;
+}
+.slider-round:before {
+  position: absolute; content: "";
+  height: 14px; width: 14px;
+  left: 3px; bottom: 2px;
+  background-color: var(--text-muted);
+  border-radius: 50%;
+  transition: .4s;
+}
+input:checked + .slider-round { background-color: var(--primary); border-color: var(--primary); }
+input:checked + .slider-round:before { transform: translateX(20px); background-color: #fff; }
+.label-text { font-size: 13px; font-weight: 600; color: var(--text-light); }
