@@ -4,40 +4,72 @@
 {% block content %}
 
 <section class="uploader">
-  <div id="drop-zone" class="drop"> <div class="hint">Drag & drop an audio file here<br>or click to browse</div>
+  <div id="drop-zone" class="drop">
+    <div class="hint">Drag & drop an audio file here<br>or click to browse</div>
   </div>
 </section>
 
 <main class="workspace">
 
-  <aside class="left-panel">
-    <div class="panel-title">
-      <span>Equalizer</span>
-      <span id="eq-mode-label"></span>
+  <aside class="left-panel" style="height: 600px;">
+    <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+          <span>Equalizer</span>
+          <span id="eq-mode-label"></span>
+      </div>
+      <div style="display:flex; gap:10px; align-items: center;">
+          <div id="ai-switch-container" class="ai-switch-wrapper" style="display:none;">
+            <div class="ai-switch">
+              <input type="radio" id="mode-custom" name="ai_mode_switch" value="custom" checked>
+              <label for="mode-custom">Custom</label>
+
+              <input type="radio" id="mode-ai" name="ai_mode_switch" value="ai">
+              <label for="mode-ai">AI-Model</label>
+
+              <div class="switch-selection"></div>
+            </div>
+          </div>
+
+          <button id="btn-reset-eq" style="font-size:13px; font-weight:600; padding:6px 12px; background:#333; border:1px solid #555; border-radius:4px; color:#fff; cursor:pointer;">
+            Reset
+          </button>
+      </div>
     </div>
 
-    <div id="generic-tools" class="tool-row">
-      <button id="btn-add-subband">Add Sub-Band</button>
-      <button id="btn-clear-subband" class="btn-danger">Clear</button>
+    <div id="generic-tools" class="tool-row single-line eq-btn-group">
       <button id="btn-scheme-save">Save scheme</button>
       <label class="file-btn">
         <input id="file-scheme" type="file" accept=".json" style="display:none"/>
         <span id="btn-scheme-load">Load scheme</span>
       </label>
+      <button id="btn-clear-subband" class="btn-danger" disabled>Clear</button>
     </div>
 
     <div id="eq-sliders" class="sliders"></div>
   </aside>
 
-  <section class="center-panel">
-    <div class="panel-title">Spectrum (click & drag in Generic mode to create band)</div>
-    <canvas id="fft-canvas" width="1200" height="260"></canvas>
+  <section class="center-panel" style="height: 600px;">
+    <div class="panel-header-row">
+        <div class="header-left">
+            <div class="panel-title-inline">Spectrum Analysis</div>
+            <span class="helper-text">(Click & drag in Generic mode to create band)</span>
+        </div>
+
+        <div class="toggles-container">
+            <label class="toggle-switch disabled">
+                <input type="checkbox" id="toggle-audiogram" disabled>
+                <span class="slider-round"></span>
+                <span class="label-text">Audiogram View</span>
+            </label>
+        </div>
+    </div>
+
+    <canvas id="fft-canvas" width="1200" height="500"></canvas>
 
     <div id="spectrum-loader" class="loader-bar hidden"></div>
-
   </section>
 
-  <aside id="ai-panel" class="right-panel hidden">
+  <aside id="ai-panel" class="right-panel hidden" style="height: 600px;">
     <div class="panel-title">AI Models</div>
     <div class="tool-row">
       <label>Model:
@@ -46,7 +78,7 @@
           <option value="voices">VoiceSeparator</option>
         </select>
       </label>
-      <button id="btn-run-ai" class="btn-primary">Run AI on input</button>
+      <button id="btn-run-ai" class="btn-primary" style="display:none;">Run AI on input</button>
     </div>
     <div id="ai-sliders" class="sliders"></div>
     <div id="ai-outputs" class="ai-outputs"></div>
@@ -56,18 +88,36 @@
 
 <section class="bottom-panels">
   <div class="twocol">
+    <div class="panel">
+      <div class="panel-title">Input Signal</div>
+      <audio id="audio-in" controls style="width:100%; margin-bottom:10px;"></audio>
+      <canvas id="wave-in" width="635" height="120"></canvas>
+    </div>
 
     <div class="panel">
-      <div class="panel-title">Input</div>
-      <audio id="audio-in" controls></audio> <canvas id="wave-in" width="1200" height="160"></canvas> <canvas id="spec-in" width="1200" height="180"></canvas> </div>
-
-    <div class="panel">
-      <div class="panel-title">Output</div>
-      <audio id="audio-out" controls></audio> <canvas id="wave-out" width="1200" height="160"></canvas> <canvas id="spec-out" width="1200" height="180"></canvas> </div>
-
+      <div class="panel-title">Output Signal</div>
+      <audio id="audio-out" controls style="width:100%; margin-bottom:10px;"></audio>
+      <canvas id="wave-out" width="635" height="120"></canvas>
+    </div>
   </div>
 
-  <div class="sync-controls panel">
+  <div class="twocol" style="margin-top: 20px;">
+    <div class="spectrogram-container panel">
+      <div class="panel-title">Input Spectrogram</div>
+      <div class="spec-wrapper">
+        <canvas id="spec-in" width="635" height="260"></canvas>
+      </div>
+    </div>
+
+    <div class="spectrogram-container panel">
+      <div class="panel-title">Output Spectrogram</div>
+      <div class="spec-wrapper">
+        <canvas id="spec-out" width="635" height="260"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="sync-controls panel" style="margin-top: 20px;">
     <button id="play-input">Play Input</button>
     <button id="play-output">Play Output</button>
     <button id="sync-reset">Reset View</button>
