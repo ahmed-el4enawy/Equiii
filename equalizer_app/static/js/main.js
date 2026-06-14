@@ -509,3 +509,304 @@ async function refreshAll() {
     await refreshSpectrograms();
     if (spectrumLoader) spectrumLoader.classList.add("hidden");
 }
+
+function bindSpectrumSelection() {
+    if (!spectrumCanvas) return;
+    const cvs = spectrumCanvas;
+    const marginL = 40;
+    cvs.addEventListener("mousedown", (e) => {
+        if (state.mode !== "generic" || !state.signalId) return;
+        state.selecting = true;
+        const r = cvs.getBoundingClientRect();
+        const scaleX = cvs.width / r.width;
+        state.selStartX = (e.clientX - r.left) * scaleX;
+        state.selEndX = state.selStartX;
+        redrawSpectrum();
+    });
+    cvs.addEventListener("mousemove", (e) => {
+        if (!state.selecting) return;
+        const r = cvs.getBoundingClientRect();
+        const scaleX = cvs.width / r.width;
+        state.selEndX = (e.clientX - r.left) * scaleX;
+        redrawSpectrum();
+    });
+    window.addEventListener("mouseup", async () => {
+        if (!state.selecting) return;
+        state.selecting = false;
+        redrawSpectrum();
+        const band = await promptBandFromSelection();
+        if (band) {
+            state.subbands.push(band);
+            renderEqSliders();
+            redrawSpectrum();
+        }
+    });
+
+    function redrawSpectrum() {
+        if (state.spectrumMags) drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx);
+    }
+
+    function promptBandFromSelection() {
+        const W = spectrumCanvas.width;
+        const drawW = W - 40 - 20;
+        const x1 = Math.min(state.selStartX, state.selEndX), x2 = Math.max(state.selStartX, state.selEndX);
+        const freq1 = ((Math.max(0, x1 - 40) / drawW) * state.fmax).toFixed(1);
+        const freq2 = ((Math.max(0, x2 - 40) / drawW) * state.fmax).toFixed(1);
+        const resp = window.prompt(`Sub-band:\nMin Hz, Max Hz, Gain (0..2)\n`, `${freq1}, ${freq2}, 1.0`);
+        if (!resp) return null;
+        const p = resp.split(",").map(s => +s.trim());
+        if (p.length < 3 || p.some(Number.isNaN)) return null;
+        return {
+            id: `sb${Date.now()}`,
+            fmin: Math.min(p[0], p[1]),
+            fmax: Math.max(p[0], p[1]),
+            gain: Math.max(0, Math.min(2, p[2]))
+        };
+    }
+}
+
+function renderEqSliders() {
+    // Ensure visibility states are correct whenever sliders are re-rendered
+    updateButtonVisibility();
+
+    if (state.mode === 'generic') {
+        renderGenericSubbands();
+    } else {
+        renderCustomizedSliders();
+    }
+}
+
+// ---------- AI SLIDERS LOGIC ----------
+async function runAI() {
+    if (!state.signalId) return alert("Upload a signal first");
+
+    setStatus("Running AI Separation (this may take a moment)...");
+
+    // Explicitly show loader for AI
+    if (spectrumLoader) spectrumLoader.classList.remove("hidden");
+
+    try {
+        const resp = await apiPost(`/api/run_ai/${state.signalId}/`, {mode: state.mode});
+        if (resp.status === "ok") {
+            state.aiMode = true;
+            state.aiStems = resp.stems;
+
+            // Initialize stem gains from current slider values if they exist
+            state.stemGains = {};
+            resp.stems.forEach((stem, idx) => {
+                // Try to match stem name with existing slider
+                const slider = state.customSliders.find(s =>
+                    s.name.toLowerCase() === stem.toLowerCase() ||
+                    s.id === `custom${idx}`
+                );
+                if (slider) {
+                    // Preserve existing slider value
+                    state.stemGains[stem] = slider.gain;
+                } else {
+                    // Default to 1.0 (100%)
+                    state.stemGains[stem] = 1.0;
+                }
+            });
+
+            // Update sliders to match stem names, preserving values
+            updateSlidersForAI();
+
+            // Apply initial mix with stem gains and refresh
+            await applyEqualizer();
+
+            setStatus("AI Separation Complete. Stems available.");
+        } else {
+            setStatus(`AI Error: ${resp.message}`);
+            alert("AI Error: " + resp.message);
+            // Revert switch to Custom on error
+            if (radioCustom) radioCustom.checked = true;
+            state.aiMode = false;
+        }
+    } catch (err) {
+        console.error(err);
+        setStatus("AI Failed to run.");
+        // Revert switch
+        if (radioCustom) radioCustom.checked = true;
+        state.aiMode = false;
+    } finally {
+        if (spectrumLoader) spectrumLoader.classList.add("hidden");
+    }
+}
+
+function updateSlidersForAI() {
+    if (!eqPanel) return;
+    // Update slider labels and data attributes to match AI stems
+    // but preserve their current values
+    const sliderInputs = eqPanel.querySelectorAll('input[type="range"]');
+
+    state.aiStems.forEach((stem, idx) => {
+        if (idx < sliderInputs.length) {
+            const input = sliderInputs[idx];
+            const row = input.closest('.sb-row');
+            if (row) {
+                const title = row.querySelector('.sb-title');
+                const gainDisplay = row.querySelector('.sb-gain');
+                const capStem = stem.charAt(0).toUpperCase() + stem.slice(1);
+
+                if (title) title.textContent = capStem;
+
+                // Update data attribute for AI processing
+                input.dataset.stem = stem;
+                delete input.dataset.id; // Remove custom ID
+
+                // Preserve current value and sync stemGains
+                const currentValue = +input.value;
+                state.stemGains[stem] = currentValue / 100.0;
+
+                if (gainDisplay) gainDisplay.textContent = `${currentValue.toFixed(0)}%`;
+            }
+        }
+    });
+
+    // Update event handler to work with stem data
+    updateSliderEventHandler();
+}
+
+function updateSlidersForCustom() {
+    if (!eqPanel) return;
+    // Restore custom slider labels and data attributes
+    const sliderInputs = eqPanel.querySelectorAll('input[type="range"]');
+
+    state.customSliders.forEach((slider, idx) => {
+        if (idx < sliderInputs.length) {
+            const input = sliderInputs[idx];
+            const row = input.closest('.sb-row');
+            if (row) {
+                const title = row.querySelector('.sb-title');
+                const gainDisplay = row.querySelector('.sb-gain');
+
+                if (title) title.textContent = slider.name;
+
+                // Update data attribute for custom processing
+                input.dataset.id = slider.id;
+                delete input.dataset.stem; // Remove AI stem name
+
+                // Sync slider gain from current value
+                const currentValue = +input.value;
+                slider.gain = currentValue / 100.0;
+
+                if (gainDisplay) gainDisplay.textContent = `${currentValue.toFixed(0)}%`;
+            }
+        }
+    });
+
+    // Update event handler to work with custom data
+    updateSliderEventHandler();
+}
+
+function updateSliderEventHandler() {
+    if (!eqPanel) return;
+
+    // Set unified event handler that works for both modes
+    eqPanel.oninput = async (e) => {
+        const r = e.target;
+        if (r.tagName === "INPUT") {
+            const val = +r.value;
+
+            if (state.aiMode && r.dataset.stem) {
+                // AI mode - update stemGains
+                const stem = r.dataset.stem;
+                state.stemGains[stem] = val / 100.0;
+                r.parentElement.querySelector(".sb-gain").textContent = `${val}%`;
+            } else if (!state.aiMode && r.dataset.id) {
+                // Custom mode - update slider gain
+                const id = r.dataset.id;
+                const slider = state.customSliders.find(s => s.id === id);
+                if (slider) {
+                    slider.gain = val / 100.0;
+                    r.parentElement.querySelector(".sb-gain").textContent = `${val}%`;
+                }
+            }
+            await applyEqualizerDebounced();
+        }
+    };
+}
+
+function renderGenericSubbands() {
+    if (!eqPanel) return;
+    eqPanel.innerHTML = "";
+    if (btnClearSubBand) btnClearSubBand.disabled = !(state.signalId && state.subbands.length > 0);
+    state.subbands.forEach((b, idx) => {
+        const row = document.createElement("div");
+        row.className = "sb-row";
+        row.innerHTML = `<div class="sb-title">SubBand ${idx + 1} [${b.fmin.toFixed(1)}–${b.fmax.toFixed(1)} Hz]</div><input type="range" min="0" max="2" step="0.01" value="${b.gain}" data-id="${b.id}"/><span class="sb-gain">${b.gain.toFixed(2)}x</span><button data-act="edit" data-id="${b.id}">Edit</button><button data-act="del" data-id="${b.id}" class="btn-danger">Delete</button>`;
+        eqPanel.appendChild(row);
+    });
+    eqPanel.oninput = async (e) => {
+        const r = e.target;
+        if (r.tagName === "INPUT") {
+            const id = r.dataset.id;
+            const sb = state.subbands.find(s => s.id === id);
+            if (sb) {
+                sb.gain = +r.value;
+                r.parentElement.querySelector(".sb-gain").textContent = `${sb.gain.toFixed(2)}x`;
+                await applyEqualizerDebounced();
+            }
+        }
+    };
+    eqPanel.onclick = async (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        const id = b.dataset.id;
+        const sb = state.subbands.find(s => s.id === id);
+        if (!sb) return;
+        if (b.dataset.act === "del") {
+            state.subbands = state.subbands.filter(s => s.id !== id);
+            renderEqSliders();
+            if (state.spectrumMags) drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx);
+            await applyEqualizer();
+        } else if (b.dataset.act === "edit") {
+            const resp = window.prompt(`Edit Sub-band:\nMin Hz, Max Hz, Gain`, `${sb.fmin.toFixed(1)}, ${sb.fmax.toFixed(1)}, ${sb.gain.toFixed(2)}`);
+            if (resp) {
+                const p = resp.split(",").map(s => +s.trim());
+                if (p.length >= 2 && !p.some(Number.isNaN)) {
+                    sb.fmin = Math.min(p[0], p[1]);
+                    sb.fmax = Math.max(p[0], p[1]);
+                    if (p[2] !== undefined && !isNaN(p[2])) sb.gain = Math.max(0, Math.min(2, p[2]));
+                    renderEqSliders();
+                    if (state.spectrumMags) drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx);
+                    await applyEqualizer();
+                }
+            }
+        }
+    };
+}
+
+async function renderCustomizedSliders() {
+    if (!eqPanel) return;
+    eqPanel.innerHTML = "<p>Loading sliders...</p>";
+    try {
+        let modeName = 'generic';
+        if (state.mode === 'music') modeName = 'musical instruments'; else if (state.mode === 'animal') modeName = 'animal sounds'; else if (state.mode === 'human') modeName = 'human voices';
+        if (modeName === 'generic') {
+            eqPanel.innerHTML = "";
+            return;
+        }
+        const resp = await apiGet(`/api/custom_conf/0/?mode=${modeName}`);
+        state.customSliders = resp.sliders || [];
+        eqPanel.innerHTML = "";
+        if (state.customSliders.length === 0) {
+            eqPanel.innerHTML = "<p>No sliders defined.</p>";
+            return;
+        }
+        state.customSliders.forEach((slider, idx) => {
+            const row = document.createElement("div");
+            row.className = "sb-row";
+            slider.id = `custom${idx}`;
+            // Convert gain (0-2 multiplier) to percentage (0-100%) for display
+            const percentage = slider.gain * 100;
+            row.innerHTML = `<div class="sb-title">${slider.name}</div><input type="range" min="0" max="100" step="1" value="${percentage}" data-id="${slider.id}"/><span class="sb-gain">${percentage.toFixed(0)}%</span>`;
+            eqPanel.appendChild(row);
+        });
+
+        // Set unified event handler
+        updateSliderEventHandler();
+    } catch (err) {
+        console.error(err);
+    }
+}
