@@ -810,3 +810,262 @@ async function renderCustomizedSliders() {
         console.error(err);
     }
 }
+
+let eqTimer = null;
+
+async function applyEqualizerDebounced() {
+    if (eqTimer) clearTimeout(eqTimer);
+    eqTimer = setTimeout(applyEqualizer, 120);
+}
+
+async function applyEqualizer() {
+    if (!state.signalId) return;
+    let payload = {};
+
+    // Only use AI mode if we actually have stems
+    if (state.aiMode && state.aiStems.length > 0) {
+        payload = {mode: "ai_mix", gains: state.stemGains};
+    } else {
+        payload = state.mode === "generic" ? {mode: "generic", subbands: state.subbands} : {
+            mode: state.mode,
+            sliders: state.customSliders
+        };
+    }
+
+    try {
+        if (spectrumLoader) spectrumLoader.classList.remove("hidden");
+        await apiPost(`/api/equalize/${state.signalId}/`, payload);
+        await refreshOutputs();
+    } catch (err) {
+        console.error(err);
+        setStatus(`Equalize error: ${err.message}`);
+        if (spectrumLoader) spectrumLoader.classList.add("hidden");
+    }
+}
+
+function bindToggles() {
+    if (btnResetEq) btnResetEq.addEventListener("click", async () => {
+        if (!state.signalId) return;
+
+        // Reset all slider values to 100%
+        const sliderInputs = eqPanel.querySelectorAll('input[type="range"]');
+        sliderInputs.forEach(input => {
+            input.value = 100;
+            const gainDisplay = input.parentElement.querySelector('.sb-gain');
+            if (gainDisplay) gainDisplay.textContent = '100%';
+        });
+
+        if (state.aiMode && state.aiStems.length > 0) {
+            // Reset AI stem gains
+            Object.keys(state.stemGains).forEach(k => state.stemGains[k] = 1.0);
+        } else if (state.mode === 'generic') {
+            // Reset generic subbands
+            state.subbands.forEach(s => s.gain = 1.0);
+        } else {
+            // Reset custom sliders
+            state.customSliders.forEach(s => s.gain = 1.0);
+        }
+
+        await applyEqualizer();
+    });
+
+    if (btnClearSubBand) btnClearSubBand.addEventListener("click", async () => {
+        if (state.mode !== 'generic' || !state.signalId) return;
+        state.subbands = [];
+        renderEqSliders();
+        if (state.spectrumMags) drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx);
+        await applyEqualizer();
+    });
+
+    if (modeSelect) modeSelect.addEventListener("change", async e => {
+        state.mode = e.target.value;
+        state.subbands = [];
+        state.customSliders = [];
+
+        // Update UI for new mode
+        updateAIVisibility(state.mode);
+        updateButtonVisibility(); // Immediately update button state
+
+        // Force Custom logic when switching modes
+        state.aiMode = false;
+        if (state.mode !== 'generic') await renderCustomizedSliders(); else renderEqSliders();
+        if (state.signalId) await applyEqualizer();
+    });
+
+    if (toggleAudiogram) toggleAudiogram.addEventListener("change", e => {
+        state.scale = e.target.checked ? "audiogram" : "linear";
+        if (state.signalId) refreshOutputs(); else if (state.spectrumMags) drawSpectrum(state.spectrumMags, state.fmax, spectrumCanvas, spectrumCtx);
+    });
+    if (toggleBackend) toggleBackend.addEventListener("change", e => {
+        state.fftBackend = e.target.checked ? "cpp" : "numpy";
+        if (state.signalId) refreshOutputs();
+    });
+
+    // === NEW SWITCH LISTENER ===
+    const switchInputs = document.querySelectorAll('input[name="ai_mode_switch"]');
+    switchInputs.forEach(input => {
+        input.addEventListener('change', async (e) => {
+            if (!state.signalId) {
+                alert("Upload a signal first.");
+                radioCustom.checked = true; // Revert
+                return;
+            }
+
+            if (e.target.value === 'ai') {
+                // Switching TO AI Mode
+                if (state.aiStems.length > 0) {
+                    // Already have stems, update sliders to show stem names
+                    state.aiMode = true;
+                    updateSlidersForAI();
+                    await applyEqualizer();
+                    await refreshOutputs();
+                } else {
+                    // Need to run AI processing first
+                    await runAI();
+                }
+            } else {
+                // Switching TO Custom Mode
+                state.aiMode = false;
+                // Update sliders back to custom names and ensure event handler is correct
+                if (state.mode !== 'generic' && state.customSliders.length > 0) {
+                    updateSlidersForCustom();
+                }
+                await applyEqualizer();
+                await refreshOutputs();
+            }
+        });
+    });
+}
+
+function bindSaveLoad() {
+    if (btnSaveScheme) btnSaveScheme.addEventListener("click", async () => {
+        if (!state.signalId) return alert("Upload a signal first.");
+        const scheme = state.mode === "generic" ? {mode: "generic", subbands: state.subbands} : {
+            mode: state.mode,
+            sliders: state.customSliders
+        };
+        const buf = await apiPost(`/api/save_scheme/${state.signalId}/`, scheme);
+        const j = typeof buf === "object" ? buf : JSON.parse(new TextDecoder().decode(buf));
+        downloadBlob(new TextEncoder().encode(JSON.stringify(j.data, null, 2)), j.filename, "application/json");
+    });
+    if (fileInput) fileInput.addEventListener("change", (e) => {
+        const f = e.target.files?.[0];
+        if (f) doUploadFile(f);
+    });
+    const fileSchemeInput = firstSel("#file-scheme");
+    if (fileSchemeInput) fileSchemeInput.addEventListener("change", async (e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        const data = JSON.parse(await f.text());
+        await apiPost(`/api/load_scheme/${state.signalId}/`, data);
+        state.mode = data.mode || "generic";
+        state.subbands = data.subbands || [];
+        state.customSliders = data.sliders || [];
+        if (modeSelect) modeSelect.value = state.mode;
+        updateAIVisibility(state.mode);
+        renderEqSliders();
+        await applyEqualizer();
+    });
+}
+
+function bindCanvasSeeking() {
+    const configs = [{cvs: inputCanvas, audio: audioIn, marginL: 50, marginR: 20}, {
+        cvs: specInCanvas,
+        audio: audioIn,
+        marginL: 50,
+        marginR: 20
+    }, {cvs: outputCanvas, audio: audioOut, marginL: 50, marginR: 20}, {
+        cvs: specOutCanvas,
+        audio: audioOut,
+        marginL: 50,
+        marginR: 20
+    }];
+    configs.forEach(cfg => {
+        if (!cfg.cvs) return;
+        const handleSeek = (e) => {
+            if (!state.duration) return;
+            const rect = cfg.cvs.getBoundingClientRect();
+            const scaleX = cfg.cvs.width / rect.width;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const drawW = cfg.cvs.width - cfg.marginL - cfg.marginR;
+            let ratio = (clickX - cfg.marginL) / drawW;
+            ratio = Math.max(0, Math.min(1, ratio));
+            if (cfg.audio) {
+                cfg.audio.currentTime = ratio * state.duration;
+            }
+        };
+        let isDragging = false;
+        cfg.cvs.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            handleSeek(e);
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (isDragging) handleSeek(e);
+        });
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+    });
+}
+
+function bindPlayback() {
+    if (!audioIn || !audioOut) return;
+
+    function updateVisuals() {
+        requestAnimationFrame(updateVisuals);
+        let inRatio = 0;
+        if (state.duration > 0) {
+            inRatio = audioIn.currentTime / state.duration;
+        }
+        if (state.inputSamples.length > 0) drawWavePreview(inputCanvas, inCtx, state.inputSamples, inRatio);
+        if (state.specInBitmap) drawSpectrogram(specInCanvas, specInCtx, null, true, inRatio);
+        let outRatio = 0;
+        if (state.duration > 0) {
+            outRatio = audioOut.currentTime / state.duration;
+        }
+        if (state.outputSamples.length > 0) drawWavePreview(outputCanvas, outCtx, state.outputSamples, outRatio);
+        if (state.specOutBitmap) drawSpectrogram(specOutCanvas, specOutCtx, null, false, outRatio);
+    }
+
+    requestAnimationFrame(updateVisuals);
+    btnPlayInput.addEventListener("click", () => {
+        if (audioIn.paused) {
+            audioIn.play();
+            btnPlayInput.textContent = "Pause Input";
+        } else {
+            audioIn.pause();
+            btnPlayInput.textContent = "Play Input";
+        }
+    });
+    btnPlayOutput.addEventListener("click", () => {
+        if (audioOut.paused) {
+            audioOut.play();
+            btnPlayOutput.textContent = "Pause Output";
+        } else {
+            audioOut.pause();
+            btnPlayOutput.textContent = "Play Output";
+        }
+    });
+    btnSyncReset.addEventListener("click", () => {
+        audioIn.pause();
+        audioOut.pause();
+        audioIn.currentTime = 0;
+        audioOut.currentTime = 0;
+        btnPlayInput.textContent = "Play Input";
+        btnPlayOutput.textContent = "Play Output";
+    });
+}
+
+function init() {
+    bindUpload();
+    bindSpectrumSelection();
+    bindPlayback();
+    bindToggles();
+    bindSaveLoad();
+    bindCanvasSeeking();
+    setGlobalState(false);
+    setStatus("Ready.");
+    updateButtonVisibility(); // Initialize visibility
+}
+
+document.addEventListener("DOMContentLoaded", init);
